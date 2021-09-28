@@ -28,24 +28,27 @@ async function start(fields, cozyParameters) {
   log('info', 'Start konnector ...')
 
   try {
-    const payload = process.env.COZY_PAYLOAD || {}
-    log('info', `payload : ${payload}`)
-    if (payload.serviceExportUrl && payload.signedConsent) {
-      await consentImport()
-      return
-    } else if (payload.signedConsent && payload.data && payload.user) {
-      // TODO import
-      console.log('import')
-      return
-    }
-
-    log('info', `Start consent exchange...`)
-
     const email = fields.login
     const url = process.env.COZY_URL.replace(/(^\w+:|^)\/\//, '')
 
     const cozyFields = JSON.parse(process.env.COZY_FIELDS || '{}')
     const account = cozyFields.account
+    const payload = process.env.COZY_PAYLOAD || {}
+
+    log('info', `payload : ${payload}`)
+    if (payload.serviceExportUrl && payload.signedConsent) {
+      log('info', `Start consent import...`)
+      await consentImport(account, payload)
+      return
+    } else if (payload.signedConsent && payload.data && payload.user) {
+      // TODO import
+      log('info', `Start data import...`)
+      await importData(payload)
+      return
+    }
+
+    log('info', `Start consent exchange...`)
+
 
     const token = generateJWT(serviceKey, secretKey)
 
@@ -184,14 +187,15 @@ const createConsent = async (token, params) => {
   })
 }
 
-const consentImport = async (account, params) => {
+const consentImport = async (accountId, params) => {
   const token = generateJWT(serviceKey, secretKey)
   const { serviceExportUrl, signedConsent } = params
   if (!serviceExportUrl || !signedConsent) {
     throw new Error('Missing parameters')
   }
   console.log('service export url : ', serviceExportUrl)
-  const dataImportUrl = 'webhook' // webhook URL
+  const webhook = await getAccountWebhook(accountId)
+  const dataImportUrl = webhook.links.webhook
   await request.post(`${serviceExportUrl}`, {
     body: {
       signedConsent,
@@ -201,6 +205,15 @@ const consentImport = async (account, params) => {
       bearer: token
     }
   })
+}
+
+const importData = async params => {
+  const { data } = params
+  if (!data) {
+    throw new Error('Missing parameters')
+  }
+  console.log('data : ', data)
+
 }
 
 const generateJWT = (serviceKey, secretKey) => {
