@@ -75,7 +75,7 @@ async function start(fields, cozyParameters) {
 
     const webhook = await getOrCreateWebhook(account)
     const importUrl = webhook.links.webhook
-    log('info', `Webhook created on ${importUrl}`)
+    log('info', `Webhook available on ${importUrl}`)
 
     log('info', 'Create import consent...')
     const consent = await createConsent(token, {
@@ -114,7 +114,8 @@ const getOrCreateWebhook = async accountId => {
       worker: 'konnector',
       type: '@webhook',
       message: {
-        account: accountId
+        account: accountId,
+        konnector: VENDOR.toLowerCase()
       }
     })
     return newWebhook.data
