@@ -1,25 +1,21 @@
 const {
   BaseKonnector,
   requestFactory,
-  scrape,
   log,
-  utils
+  errors,
+  cozyClient
 } = require('cozy-konnector-libs')
+const KJUR = require('jsrsasign')
 const request = requestFactory({
-  // The debug mode shows all the details about HTTP requests and responses. Very useful for
-  // debugging but very verbose. This is why it is commented out by default
-  // debug: true,
-  // Activates [cheerio](https://cheerio.js.org/) parsing on each page
-  cheerio: true,
-  // If cheerio is activated do not forget to deactivate json parsing (which is activated by
-  // default in cozy-konnector-libs
-  json: false,
-  // This allows request-promise to keep cookies between requests
-  jar: true
+  json: true
 })
 
-const VENDOR = 'template'
-const baseUrl = 'http://books.toscrape.com'
+const VENDOR = 'Jobready'
+const baseUrl = 'https://visionstrust.com/v1'
+const serviceKey =
+  'SlQ03OMYYo3MAGSdM2UqUuVEGf2Je81N63tUa81D8LgK8CAbxPoSELxmLPtpLGvXdp8ckPAvs6BtuHTeNTjPcoS1SwwumLZjjRd4'
+const secretKey = 'LjldXJAX6MJm2qi'
+const client = cozyClient.new
 
 module.exports = new BaseKonnector(start)
 
@@ -29,96 +25,195 @@ module.exports = new BaseKonnector(start)
 // cozyParameters are static parameters, independents from the account. Most often, it can be a
 // secret api key.
 async function start(fields, cozyParameters) {
-  log('info', 'Authenticating ...')
-  if (cozyParameters) log('debug', 'Found COZY_PARAMETERS')
-  await authenticate.bind(this)(fields.login, fields.password)
-  log('info', 'Successfully logged in')
-  // The BaseKonnector instance expects a Promise as return of the function
-  log('info', 'Fetching the list of documents')
-  const $ = await request(`${baseUrl}/index.html`)
-  // cheerio (https://cheerio.js.org/) uses the same api as jQuery (http://jquery.com/)
-  log('info', 'Parsing list of documents')
-  const documents = await parseDocuments($)
+  log('info', 'Start konnector ...')
 
-  // Here we use the saveBills function even if what we fetch are not bills,
-  // but this is the most common case in connectors
-  log('info', 'Saving data to Cozy')
-  await this.saveBills(documents, fields, {
-    // This is a bank identifier which will be used to link bills to bank operations. These
-    // identifiers should be at least a word found in the title of a bank operation related to this
-    // bill. It is not case sensitive.
-    identifiers: ['books']
+  try {
+    const payload = process.env.COZY_PAYLOAD || {}
+    log('info', `payload : ${payload}`)
+    if (payload.serviceExportUrl && payload.signedConsent) {
+      await consentImport()
+      return
+    } else if (payload.signedConsent && payload.data && payload.user) {
+      // TODO import
+      console.log('import')
+      return
+    }
+
+    log('info', `Start consent exchange...`)
+
+    const email = fields.login
+    const url = process.env.COZY_URL.replace(/(^\w+:|^)\/\//, '')
+
+    const cozyFields = JSON.parse(process.env.COZY_FIELDS || '{}')
+    const account = cozyFields.account
+
+    const token = generateJWT(serviceKey, secretKey)
+
+    log('info', 'Get user...')
+    const user = await getOrCreateUser(token, { email, userServiceId: url })
+    if (!user) {
+      throw new Error('No user found')
+    }
+
+    log('info', 'Get purposes...')
+    const purposes = await getPurposes(token)
+    if (purposes.length < 1) {
+      throw new Error('No purpose found')
+    }
+    const purposeId = purposes[0].id
+
+    log('info', 'Get import info...')
+    const popup = await popupImport(token, {
+      purpose: purposeId,
+      emailImport: email
+    })
+
+    const datatypes = popup.datatypes.filter(
+      type => type.serviceExport === VENDOR
+    )
+    const emailExport = popup.emailsExport.find(type => type.service === VENDOR)
+
+    const webhook = await getOrCreateWebhook(account)
+    const importUrl = webhook.links.webhook
+    log('info', `Webhook created on ${importUrl}`)
+
+    log('info', 'Create import consent...')
+    const consent = await createConsent(token, {
+      datatypes,
+      emailImport: user.email,
+      emailExport: emailExport.email,
+      serviceExport: VENDOR,
+      purpose: purposeId,
+      userKey: user.userKey
+    })
+    log('info', `Got consent : ${consent}`)
+
+    log('info', 'Done!')
+  } catch (err) {
+    log('error', err && err.message)
+    throw new Error(errors.VENDOR_DOWN)
+  }
+}
+
+const getAccountWebhook = async accountId => {
+  const selector = {
+    worker: 'konnector',
+    type: '@webhook'
+  }
+  const webhooks = await client.collection('io.cozy.triggers').find(selector)
+  return webhooks.data.find(webhook => {
+    const msg = webhook.attributes.message
+    return msg && msg.account === accountId
   })
 }
 
-// This shows authentication using the [signin function](https://github.com/konnectors/libs/blob/master/packages/cozy-konnector-libs/docs/api.md#module_signin)
-// even if this in another domain here, but it works as an example
-function authenticate(username, password) {
-  return this.signin({
-    url: `http://quotes.toscrape.com/login`,
-    formSelector: 'form',
-    formData: { username, password },
-    // The validate function will check if the login request was a success. Every website has a
-    // different way to respond: HTTP status code, error message in HTML ($), HTTP redirection
-    // (fullResponse.request.uri.href)...
-    validate: (statusCode, $, fullResponse) => {
-      log(
-        'debug',
-        fullResponse.request.uri.href,
-        'not used here but should be useful for other connectors'
-      )
-      // The login in toscrape.com always works except when no password is set
-      if ($(`a[href='/logout']`).length === 1) {
-        return true
-      } else {
-        // cozy-konnector-libs has its own logging function which format these logs with colors in
-        // standalone and dev mode and as JSON in production mode
-        log('error', $('.error').text())
-        return false
+const getOrCreateWebhook = async accountId => {
+  const accountWebhook = await getAccountWebhook(accountId)
+  if (!accountWebhook) {
+    const newWebhook = await client.collection('io.cozy.triggers').create({
+      worker: 'konnector',
+      type: '@webhook',
+      message: {
+        account: accountId
       }
+    })
+    return newWebhook.data
+  }
+  return accountWebhook
+}
+
+const getOrCreateUser = async (token, params) => {
+  const { email, userServiceId } = params
+
+  let user
+  try {
+    user = await request.get(`${baseUrl}/users/${email}`, {
+      auth: {
+        bearer: token
+      }
+    })
+    if (user) {
+      return user
+    }
+  } catch (err) {
+    if (err.statusCode == 400) {
+      return request.post(`${baseUrl}/users`, {
+        body: { email, userServiceId },
+        auth: {
+          bearer: token
+        }
+      })
+    }
+    throw new Error(err)
+  }
+}
+
+const getPurposes = async token => {
+  return request.get(`${baseUrl}/purposes/list`, {
+    auth: {
+      bearer: token
     }
   })
 }
 
-// The goal of this function is to parse a HTML page wrapped by a cheerio instance
-// and return an array of JS objects which will be saved to the cozy by saveBills
-// (https://github.com/konnectors/libs/blob/master/packages/cozy-konnector-libs/docs/api.md#savebills)
-function parseDocuments($) {
-  // You can find documentation about the scrape function here:
-  // https://github.com/konnectors/libs/blob/master/packages/cozy-konnector-libs/docs/api.md#scrape
-  const docs = scrape(
-    $,
-    {
-      title: {
-        sel: 'h3 a',
-        attr: 'title'
-      },
-      amount: {
-        sel: '.price_color',
-        parse: normalizePrice
-      },
-      fileurl: {
-        sel: 'img',
-        attr: 'src',
-        parse: src => `${baseUrl}/${src}`
-      }
-    },
-    'article'
-  )
-  return docs.map(doc => ({
-    ...doc,
-    // The saveBills function needs a date field
-    // even if it is a little artificial here (these are not real bills)
-    date: new Date(),
-    currency: 'EUR',
-    filename: `${utils.formatDate(new Date())}_${VENDOR}_${doc.amount.toFixed(
-      2
-    )}EUR${doc.vendorRef ? '_' + doc.vendorRef : ''}.jpg`,
-    vendor: VENDOR
-  }))
+const popupImport = async (token, params) => {
+  const { purpose, emailImport } = params
+  return request.post(`${baseUrl}/popups/import`, {
+    body: { purpose, emailImport },
+    auth: {
+      bearer: token
+    }
+  })
 }
 
-// Convert a price string to a float
-function normalizePrice(price) {
-  return parseFloat(price.replace('£', '').trim())
+const createConsent = async (token, params) => {
+  const data = {
+    datatypes: params.datatypes,
+    emailImport: params.emailImport,
+    emailExport: params.emailExport,
+    serviceExport: params.serviceExport,
+    purpose: params.purpose,
+    userKey: params.userKey
+  }
+  return request.post(`${baseUrl}/consents/exchange/import`, {
+    body: data,
+    auth: {
+      bearer: token
+    }
+  })
+}
+
+const consentImport = async (account, params) => {
+  const token = generateJWT(serviceKey, secretKey)
+  const { serviceExportUrl, signedConsent } = params
+  if (!serviceExportUrl || !signedConsent) {
+    throw new Error('Missing parameters')
+  }
+  console.log('service export url : ', serviceExportUrl)
+  const dataImportUrl = 'webhook' // webhook URL
+  await request.post(`${serviceExportUrl}`, {
+    body: {
+      signedConsent,
+      dataImportUrl
+    },
+    auth: {
+      bearer: token
+    }
+  })
+}
+
+const generateJWT = (serviceKey, secretKey) => {
+  var oHeader = { alg: 'HS256', typ: 'JWT' }
+  var payload = {}
+  var tNow = KJUR.jws.IntDate.get('now')
+  payload.iat = tNow
+  payload = {
+    serviceKey,
+    iat: tNow,
+    exp: tNow + 5 * 60
+  }
+  var sHeader = JSON.stringify(oHeader)
+  var sPayload = JSON.stringify(payload)
+  var sJWT = KJUR.jws.JWS.sign('HS256', sHeader, sPayload, secretKey)
+  return sJWT
 }
