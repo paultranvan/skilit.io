@@ -3,7 +3,8 @@ const {
   requestFactory,
   log,
   errors,
-  cozyClient
+  cozyClient,
+  saveFiles
 } = require('cozy-konnector-libs')
 const KJUR = require('jsrsasign')
 const request = requestFactory({
@@ -19,13 +20,8 @@ const client = cozyClient.new
 
 module.exports = new BaseKonnector(start)
 
-// The start function is run by the BaseKonnector instance only when it got all the account
-// information (fields). When you run this connector yourself in "standalone" mode or "dev" mode,
-// the account information come from ./konnector-dev-config.json file
-// cozyParameters are static parameters, independents from the account. Most often, it can be a
-// secret api key.
-async function start(fields, cozyParameters) {
-  log('info', 'Start konnector ...')
+async function start(fields) {
+  log('info', 'Start konnector')
 
   try {
     const email = fields.login
@@ -33,39 +29,36 @@ async function start(fields, cozyParameters) {
 
     const cozyFields = JSON.parse(process.env.COZY_FIELDS || '{}')
     const account = cozyFields.account
-    const payload = process.env.COZY_PAYLOAD || {}
+    const payload = JSON.parse(process.env.COZY_PAYLOAD || '{}')
 
-    log('info', `payload : ${payload}`)
     if (payload.serviceExportUrl && payload.signedConsent) {
-      log('info', `Start consent import...`)
+      log('info', `Start consent import`)
       await consentImport(account, payload)
       return
     } else if (payload.signedConsent && payload.data && payload.user) {
-      // TODO import
-      log('info', `Start data import...`)
-      await importData(payload)
+      log('info', `Start data import`)
+      await importData(fields, payload)
       return
     }
 
-    log('info', `Start consent exchange...`)
-
+    log('info', `Start consent exchange`)
 
     const token = generateJWT(serviceKey, secretKey)
 
-    log('info', 'Get user...')
+    log('info', 'Get user')
     const user = await getOrCreateUser(token, { email, userServiceId: url })
     if (!user) {
       throw new Error('No user found')
     }
 
-    log('info', 'Get purposes...')
+    log('info', 'Get purposes')
     const purposes = await getPurposes(token)
     if (purposes.length < 1) {
       throw new Error('No purpose found')
     }
     const purposeId = purposes[0].id
 
-    log('info', 'Get import info...')
+    log('info', 'Get import info')
     const popup = await popupImport(token, {
       purpose: purposeId,
       emailImport: email
@@ -76,12 +69,12 @@ async function start(fields, cozyParameters) {
     )
     const emailExport = popup.emailsExport.find(type => type.service === VENDOR)
 
-    const webhook = await getOrCreateWebhook(account)
+    const webhook = await getOrCreateWebhook(fields, account)
     const importUrl = webhook.links.webhook
     log('info', `Webhook available on ${importUrl}`)
 
-    log('info', 'Create import consent...')
-    const consent = await createConsent(token, {
+    log('info', 'Create import consent')
+    await createConsent(token, {
       datatypes,
       emailImport: user.email,
       emailExport: emailExport.email,
@@ -89,8 +82,6 @@ async function start(fields, cozyParameters) {
       purpose: purposeId,
       userKey: user.userKey
     })
-    log('info', `Got consent : ${consent}`)
-
     log('info', 'Done!')
   } catch (err) {
     log('error', err && err.message)
@@ -110,15 +101,22 @@ const getAccountWebhook = async accountId => {
   })
 }
 
-const getOrCreateWebhook = async accountId => {
+const getFolderId = async path => {
+  const file = await client.collection('io.cozy.files').statByPath(path)
+  return file.data._id
+}
+
+const getOrCreateWebhook = async (fields, accountId) => {
   const accountWebhook = await getAccountWebhook(accountId)
   if (!accountWebhook) {
+    const targetDirId = await getFolderId(fields.folderPath)
     const newWebhook = await client.collection('io.cozy.triggers').create({
       worker: 'konnector',
       type: '@webhook',
       message: {
         account: accountId,
-        konnector: VENDOR.toLowerCase()
+        konnector: VENDOR.toLowerCase(),
+        folder_to_save: targetDirId
       }
     })
     return newWebhook.data
@@ -193,7 +191,6 @@ const consentImport = async (accountId, params) => {
   if (!serviceExportUrl || !signedConsent) {
     throw new Error('Missing parameters')
   }
-  console.log('service export url : ', serviceExportUrl)
   const webhook = await getAccountWebhook(accountId)
   const dataImportUrl = webhook.links.webhook
   await request.post(`${serviceExportUrl}`, {
@@ -207,13 +204,16 @@ const consentImport = async (accountId, params) => {
   })
 }
 
-const importData = async params => {
+const importData = async (fields, params) => {
   const { data } = params
   if (!data) {
     throw new Error('Missing parameters')
   }
-  console.log('data : ', data)
-
+  const file = {
+    filestream: JSON.stringify(data),
+    filename: `${VENDOR}.txt`
+  }
+  await saveFiles([file], fields)
 }
 
 const generateJWT = (serviceKey, secretKey) => {
