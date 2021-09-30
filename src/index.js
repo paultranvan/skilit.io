@@ -11,7 +11,7 @@ const request = requestFactory({
   json: true
 })
 
-const VENDOR = 'Jobready'
+const VENDOR = 'Skillit.io'
 const baseUrl = 'https://visionstrust.com/v1'
 const serviceKey =
   'SlQ03OMYYo3MAGSdM2UqUuVEGf2Je81N63tUa81D8LgK8CAbxPoSELxmLPtpLGvXdp8ckPAvs6BtuHTeNTjPcoS1SwwumLZjjRd4'

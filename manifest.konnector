@@ -1,13 +1,13 @@
 {
   "version": "1.0.0",
-  "name": "Jobready",
+  "name": "Skillit",
   "type": "konnector",
   "language": "node",
   "icon": "icon.svg",
-  "slug": "jobready",
-  "source": "git@github.com:paultranvan/jobready.git",
+  "slug": "skillit",
+  "source": "git@github.com:paultranvan/skillit.git",
   "editor": "Cozy",
-  "vendor_link": "https://www.jobready.fr/",
+  "vendor_link": "https://skilit.io/",
   "categories": ["education"],
   "fields": {
     "login": {
@@ -37,8 +37,8 @@
   "langs": ["fr", "en"],
   "locales": {
     "fr": {
-      "short_description": "Récupère vos données Jobready",
-      "long_description": "Récupère vos données Jobready",
+      "short_description": "Récupère vos données Skillit",
+      "long_description": "Récupère vos données Skillit",
       "permissions": {
         "files": {
           "description": "Utilisé pour sauvegarder les données sous forme de fichier"
@@ -49,8 +49,8 @@
       }
     },
     "en": {
-      "short_description": "Fetch your data from Jobready",
-      "long_description": "Fetch your data from Jobready",
+      "short_description": "Fetch your data from Skillit",
+      "long_description": "Fetch your data from Skillit",
       "permissions": {
         "files": {
           "description": "Required to save data as file"
