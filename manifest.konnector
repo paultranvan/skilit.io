@@ -4,7 +4,7 @@
   "type": "konnector",
   "language": "node",
   "icon": "icon.svg",
-  "slug": "skilit.io",
+  "slug": "skilit",
   "source": "git@github.com:paultranvan/skilit.io.git",
   "editor": "Cozy",
   "vendor_link": "https://skilit.io/",
