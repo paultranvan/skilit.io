@@ -205,7 +205,6 @@ const createConsent = async (token, params) => {
 }
 
 const consentImport = async (accountId, params) => {
-  const token = generateJWT(serviceKey, secretKey)
   const { serviceExportUrl, signedConsent } = params
   if (!serviceExportUrl || !signedConsent) {
     throw new Error('Missing parameters')
@@ -216,9 +215,6 @@ const consentImport = async (accountId, params) => {
     body: {
       signedConsent,
       dataImportUrl
-    },
-    auth: {
-      bearer: token
     }
   })
 }
