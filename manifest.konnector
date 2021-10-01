@@ -1,11 +1,11 @@
 {
   "version": "1.0.0",
-  "name": "Skillit",
+  "name": "Skilit.io",
   "type": "konnector",
   "language": "node",
   "icon": "icon.svg",
-  "slug": "skillit",
-  "source": "git@github.com:paultranvan/skillit.git",
+  "slug": "skilit",
+  "source": "git@github.com:paultranvan/skilit.io.git",
   "editor": "Cozy",
   "vendor_link": "https://skilit.io/",
   "categories": ["education"],
@@ -37,8 +37,8 @@
   "langs": ["fr", "en"],
   "locales": {
     "fr": {
-      "short_description": "Récupère vos données Skillit",
-      "long_description": "Récupère vos données Skillit",
+      "short_description": "Récupère vos données Skilit.io",
+      "long_description": "Récupère vos données Skilit.io",
       "permissions": {
         "files": {
           "description": "Utilisé pour sauvegarder les données sous forme de fichier"
@@ -49,8 +49,8 @@
       }
     },
     "en": {
-      "short_description": "Fetch your data from Skillit",
-      "long_description": "Fetch your data from Skillit",
+      "short_description": "Fetch your data from Skilit.io",
+      "long_description": "Fetch your data from Skilit.io",
       "permissions": {
         "files": {
           "description": "Required to save data as file"

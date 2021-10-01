@@ -11,7 +11,8 @@ const request = requestFactory({
   json: true
 })
 
-const VENDOR = 'Skillit.io'
+const VENDOR = 'Skilit.io'
+const slug = 'skilit'
 const baseUrl = 'https://visionstrust.com/v1'
 const serviceKey =
   'SlQ03OMYYo3MAGSdM2UqUuVEGf2Je81N63tUa81D8LgK8CAbxPoSELxmLPtpLGvXdp8ckPAvs6BtuHTeNTjPcoS1SwwumLZjjRd4'
@@ -115,7 +116,7 @@ const getOrCreateWebhook = async (fields, accountId) => {
       type: '@webhook',
       message: {
         account: accountId,
-        konnector: VENDOR.toLowerCase(),
+        konnector: slug.toLowerCase(),
         folder_to_save: targetDirId
       }
     })
